@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tutto Sistema</title>
+
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#111">
+
+<style>
+body{margin:0;background:#111;color:#d4af37;font-family:Arial}
+header{
+  text-align:center;
+  padding:20px;
+  background:#111;
+  border-bottom:2px solid #d4af37;
+}
+.logo-banner{
+  width:200px;
+  display:block;
+  margin:0 auto;
+}
+button{
+  padding:10px;
+  border:none;
+  border-radius:8px;
+  background:#d4af37;
+  color:#000;
+  font-weight:bold;
+  margin:4px;
+}
+input{
+  padding:10px;
+  border-radius:8px;
+  border:1px solid #444;
+  background:#222;
+  color:#fff;
+  width:100%;
+}
+.section{display:none;padding:15px}
+.card{
+  background:#222;
+  padding:12px;
+  border-radius:10px;
+  margin-bottom:10px;
+  border:1px solid #333;
+}
+</style>
+</head>
+<body>
+
+<header>
+  <img src="logo.png" class="logo-banner">
+  <h2>Tutto Sistema</h2>
+</header>
+
+<div id="selector" class="section" style="display:block">
+  <h3>Seleccionar modo</h3>
+  <button onclick="mostrar('cliente')">Cliente</button>
+  <button onclick="login('mozo')">Mozo</button>
+  <button onclick="login('cocina')">Cocina</button>
+  <button onclick="login('admin')">Admin</button>
+  <button onclick="login('dueno')">Dueño</button>
+</div>
+
+<!-- CLIENTE -->
+<div id="cliente" class="section">
+  <h3>Pedido</h3>
+  <label>Mesa</label>
+  <input id="mesa" type="number">
+
+  <div id="productos"></div>
+
+  <div class="card">
+    <h3>Carrito</h3>
+    <div id="carrito"></div>
+    <p>Total: $<span id="total">0</span></p>
+    <button onclick="enviarPedido()">Enviar Pedido</button>
+  </div>
+</div>
+
+<!-- MOZO -->
+<div id="mozo" class="section">
+  <h3>Mozo</h3>
+  <div id="mozoPedidos"></div>
+</div>
+
+<!-- COCINA -->
+<div id="cocina" class="section">
+  <h3>Cocina</h3>
+  <div id="cocinaPedidos"></div>
+</div>
+
+<!-- ADMIN PRODUCTOS -->
+<div id="admin" class="section">
+  <h3>Admin Productos</h3>
+  <input id="prodNombre" placeholder="Producto">
+  <input id="prodPrecio" placeholder="Precio">
+  <button onclick="agregarProducto()">Agregar</button>
+  <div id="listaProductos"></div>
+</div>
+
+<!-- DUENO -->
+<div id="dueno" class="section">
+  <h3>Panel Dueño</h3>
+
+  <div class="card">
+    <h4>Ventas</h4>
+    <p>Hoy: $<span id="vHoy">0</span></p>
+    <p>Semana: $<span id="vSemana">0</span></p>
+    <p>Mes: $<span id="vMes">0</span></p>
+  </div>
+
+  <div class="card">
+    <h4>Caja</h4>
+    <p>Estado: <span id="cajaEstado">cerrada</span></p>
+    <button onclick="abrirCaja()">Abrir Caja</button>
+    <button onclick="cerrarCaja()">Cerrar Caja</button>
+  </div>
+
+  <div class="card">
+    <h4>Historial</h4>
+    <div id="historial"></div>
+  </div>
+
+  <canvas id="grafico"></canvas>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-app.js";
+import { getFirestore, collection, addDoc, onSnapshot, deleteDoc, doc } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-firestore.js";
+
+const firebaseConfig={
+apiKey:"AIzaSyCa-R6z76qoMt6Wf9EZFSqqGNY8U4JUMtM",
+authDomain:"menu-pro-app.firebaseapp.com",
+projectId:"menu-pro-app",
+storageBucket:"menu-pro-app.firebasestorage.app",
+messagingSenderId:"42917274964",
+appId:"1:42917274964:web:3be3c9c124b9c69b8994c1"
+};
+
+const db=getFirestore(initializeApp(firebaseConfig));
+
+let carrito=[];
+let total=0;
+let pedidosCache=[];
+
+/* CLIENTE PRODUCTOS */
+onSnapshot(collection(db,"productos"),snap=>{
+  const prodDiv=document.getElementById("productos");
+  prodDiv.innerHTML="";
+
+  snap.forEach(d=>{
+    const p=d.data();
+    prodDiv.innerHTML+=`
+    <div class="card">
+      <h4>${p.nombre}</h4>
+      <p>$${p.precio}</p>
+      <button onclick="agregar('${p.nombre}', ${p.precio})">
+        Agregar
+      </button>
+    </div>`;
+  });
+});
+
+window.agregar=(prod,precio)=>{
+  carrito.push({prod,precio});
+  total+=precio;
+  renderCarrito();
+};
+
+function renderCarrito(){
+  const c=document.getElementById("carrito");
+  c.innerHTML="";
+  carrito.forEach((it,idx)=>{
+    c.innerHTML+=`
+    <div class="card">
+      ${it.prod} - $${it.precio}
+      <button onclick="quitar(${idx})">X</button>
+    </div>`;
+  });
+  document.getElementById("total").innerText=total;
+}
+
+window.quitar=(i)=>{
+  total-=carrito[i].precio;
+  carrito.splice(i,1);
+  renderCarrito();
+}
+
+window.enviarPedido=async()=>{
+  const mesa=document.getElementById("mesa").value;
+  if(!mesa||carrito.length===0) return;
+
+  await addDoc(collection(db,"pedidos"),{
+    mesa,
+    items:carrito,
+    total,
+    estado:"pendiente",
+    createdAt:new Date(),
+    creadoPor:"cliente"
+  });
+
+  carrito=[];
+  total=0;
+  renderCarrito();
+}
+
+/* LOGIN */
+window.login=(rol)=>{
+  const pass=prompt("Contraseña");
+  if((rol==="dueno" && pass==="toto321") ||
+     (rol==="admin" && pass==="toto321") ||
+     (rol==="cocina" && pass==="cocina2026") ||
+     (rol==="mozo" && pass==="mozo2026")){
+     mostrar(rol);
+  }else{
+     alert("Contraseña incorrecta");
+  }
+}
+
+window.mostrar=(id)=>{
+  document.querySelectorAll(".section").forEach(s=>s.style.display="none");
+  document.getElementById(id).style.display="block";
+}
+
+/* ADMIN PRODUCTOS */
+window.agregarProducto=async()=>{
+  const nombre=document.getElementById("prodNombre").value;
+  const precio=document.getElementById("prodPrecio").value;
+  if(!nombre||!precio) return;
+
+  await addDoc(collection(db,"productos"),{nombre,precio});
+  document.getElementById("prodNombre").value="";
+  document.getElementById("prodPrecio").value="";
+}
+
+onSnapshot(collection(db,"productos"),snap=>{
+  const lista=document.getElementById("listaProductos");
+  lista.innerHTML="";
+
+  snap.forEach(d=>{
+    const p=d.data();
+    lista.innerHTML+=`
+    <div class="card">
+      ${p.nombre} - $${p.precio}
+      <button onclick="eliminar('${d.id}')">X</button>
+    </div>`;
+  });
+});
+
+window.eliminar=async(id)=>{
+  await deleteDoc(doc(db,"productos",id));
+};
+
+/* MOZO */
+onSnapshot(collection(db,"pedidos"),snap=>{
+  const m=document.getElementById("mozoPedidos");
+  m.innerHTML="";
+  snap.forEach(d=>{
+    const data=d.data();
+    if(data.estado==="listo"){
+      m.innerHTML+=`
+      <div class="card">
+        Mesa ${data.mesa}
+        <button onclick="entregar('${d.id}')">Entregado</button>
+      </div>`;
+    }
+  });
+});
+
+/* COCINA */
+onSnapshot(collection(db,"pedidos"),snap=>{
+  const c=document.getElementById("cocinaPedidos");
+  c.innerHTML="";
+  snap.forEach(d=>{
+    const data=d.data();
+    if(data.estado!=="entregado"){
+      c.innerHTML+=`
+      <div class="card">
+        Mesa ${data.mesa}
+        <p>${data.total}</p>
+      </div>`;
+    }
+  });
+});
+
+/* DUENO PANEL */
+onSnapshot(collection(db,"pedidos"),snap=>{
+  pedidosCache=[];
+  let hoy=new Date().toDateString();
+  let semana=0;
+  let mes=0;
+  let hoyTotal=0;
+
+  snap.forEach(d=>{
+    const data=d.data();
+    pedidosCache.push({...data,id:d.id});
+    if(data.estado==="entregado"){
+      const fecha=new Date(data.createdAt.seconds*1000);
+      const fStr=fecha.toDateString();
+      if(fStr===hoy) hoyTotal+=data.total;
+      semana+=data.total;
+      mes+=data.total;
+    }
+  });
+
+  document.getElementById("vHoy").innerText=hoyTotal;
+  document.getElementById("vSemana").innerText=semana;
+  document.getElementById("vMes").innerText=mes;
+
+  actualizarHistorial();
+  actualizarGrafico(hoyTotal);
+});
+
+/* CAJA */
+window.abrirCaja=()=>{document.getElementById("cajaEstado").innerText="abierta";}
+window.cerrarCaja=()=>{document.getElementById("cajaEstado").innerText="cerrada";guardarCierre();}
+
+function guardarCierre(){
+  const total=document.getElementById("vHoy").innerText;
+  addDoc(collection(db,"caja"),{
+    fecha:new Date(),
+    total,
+    estado:"cerrada"
+  });
+}
+
+/* HISTORIAL */
+function actualizarHistorial(){
+  const h=document.getElementById("historial");
+  h.innerHTML="";
+  pedidosCache.forEach(p=>{
+    const fecha=new Date(p.createdAt.seconds*1000);
+    h.innerHTML+=`
+    <div class="card">
+      Mesa ${p.mesa}<br>
+      Total: $${p.total}<br>
+      Fecha: ${fecha.toLocaleString()}
+    </div>`;
+  });
+}
+
+/* GRAFICO */
+let chart;
+function actualizarGrafico(valor){
+  const ctx=document.getElementById("grafico").getContext("2d");
+  if(chart) chart.destroy();
+  chart=new Chart(ctx,{
+    type:'bar',
+    data:{labels:['Hoy'],datasets:[{label:'Ventas',data:[valor]}]}
+  });
+}
+</script>
+
+</body>
+</html>
